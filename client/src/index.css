@@ -1,0 +1,83 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --primary: 272 72% 56%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 272 72% 56%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 270 15% 5%;
+    --foreground: 0 0% 98%;
+    --card: 270 15% 8%;
+    --card-foreground: 0 0% 98%;
+    --primary: 272 75% 62%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 270 10% 16%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 270 10% 16%;
+    --muted-foreground: 270 5% 65%;
+    --accent: 270 10% 16%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 40%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 270 10% 16%;
+    --input: 270 10% 16%;
+    --ring: 272 75% 62%;
+  }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  body {
+    color: hsl(var(--foreground));
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    background-color: hsl(var(--background));
+    background-image:
+      radial-gradient(ellipse at top, hsla(272, 80%, 35%, 0.22), transparent 55%),
+      radial-gradient(ellipse at bottom, hsla(290, 70%, 25%, 0.14), transparent 60%);
+    background-attachment: fixed;
+    min-height: 100vh;
+  }
+
+  h1, h2, h3 {
+    letter-spacing: -0.01em;
+  }
+}
+
+@keyframes ember {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.06); }
+}
+
+.animate-ember {
+  animation: ember 2.4s ease-in-out infinite;
+}
+
+@keyframes ring-pulse {
+  0% { box-shadow: 0 0 0 0 hsla(272, 75%, 62%, 0.5); }
+  100% { box-shadow: 0 0 0 18px hsla(272, 75%, 62%, 0); }
+}
+
+.animate-ring-pulse {
+  animation: ring-pulse 1.6s ease-out infinite;
+}
