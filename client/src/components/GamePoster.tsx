@@ -1,7 +1,7 @@
-import type { Game, Round, Player } from '@/types';
+import type { Game, GoldFormula, Round, Player } from '@/types';
 import { Badge } from '@/components/ui/badge';
 import { Coin } from '@/components/Coin';
-import { splitFormula } from '@/lib/scoring';
+import { allBrackets, splitFormula } from '@/lib/scoring';
 import { Flame, Swords, Timer } from 'lucide-react';
 
 type Variant = 'compact' | 'full' | 'projection';
@@ -91,9 +91,8 @@ export function GamePoster({
             </p>
           </Section>
         ) : (
-          game.goldFormula &&
-          game.goldFormula.ranks.length > 0 && (
-            <FormulaSection ranks={game.goldFormula.ranks} />
+          game.goldFormula && allBrackets(game.goldFormula).length > 0 && (
+            <FormulaSection formula={game.goldFormula} />
           )
         )}
 
@@ -191,16 +190,46 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function FormulaSection({ ranks }: { ranks: number[] }) {
+function FormulaSection({ formula }: { formula: GoldFormula }) {
+  const brackets = allBrackets(formula);
+  const multi = brackets.length > 1;
+  return (
+    <Section title="Gains par rang final">
+      <div className="space-y-4">
+        {brackets.map((b, idx) => (
+          <BracketView
+            key={idx}
+            ranks={b.ranks}
+            label={multi ? bracketLabel(b.minPlayers, brackets[idx + 1]?.minPlayers) : null}
+          />
+        ))}
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Ex aequo dans une zone : les gains/pertes sont partagés (arrondi inférieur). Ex aequo
+        à cheval entre gains et pertes : 0 pour tous les concernés.
+      </p>
+    </Section>
+  );
+}
+
+function bracketLabel(min: number, nextMin: number | undefined): string {
+  if (nextMin === undefined) return `${min}+ joueurs`;
+  if (nextMin - 1 === min) return `${min} joueur${min > 1 ? 's' : ''}`;
+  return `${min}–${nextMin - 1} joueurs`;
+}
+
+function BracketView({ ranks, label }: { ranks: number[]; label: string | null }) {
   const { positives, negatives } = splitFormula(ranks);
   const hasMiddle = positives.length + negatives.length < ranks.length || ranks.some((v) => v === 0);
   const positions = (n: number, from: 'top' | 'bottom') =>
     Array.from({ length: n }, (_, i) =>
       from === 'top' ? ordinal(i + 1) : i === 0 ? 'dernier' : `${ordinal(i + 1)} (en partant de la fin)`
     );
-
   return (
-    <Section title="Gains par rang final">
+    <div>
+      {label && (
+        <p className="text-xs uppercase tracking-wider text-primary/80 mb-2">{label}</p>
+      )}
       <div className="grid gap-3 sm:grid-cols-2">
         {positives.length > 0 && (
           <div>
@@ -242,11 +271,7 @@ function FormulaSection({ ranks }: { ranks: number[] }) {
           Les joueurs du milieu du classement ne gagnent ni ne perdent de pièces.
         </p>
       )}
-      <p className="mt-2 text-xs text-muted-foreground">
-        Ex aequo dans une zone : les gains/pertes sont partagés (arrondi inférieur). Ex aequo
-        à cheval entre gains et pertes : 0 pour tous les concernés.
-      </p>
-    </Section>
+    </div>
   );
 }
 

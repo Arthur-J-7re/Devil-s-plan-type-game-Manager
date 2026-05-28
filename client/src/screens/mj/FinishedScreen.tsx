@@ -1,5 +1,5 @@
 import { useStore } from '@/lib/store';
-import { clearLocalStorage, downloadSnapshot } from '@/lib/persistence';
+import { downloadSnapshot } from '@/lib/persistence';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Leaderboard } from '@/components/Leaderboard';
@@ -50,13 +50,11 @@ export function FinishedScreen() {
         <Button
           variant="destructive"
           onClick={() => {
-            if (confirm('Nouveau tournoi (efface tout) ?')) {
-              clearLocalStorage();
-              send({ type: 'mj:tournament:reset' });
-            }
+            // Le snapshot est conservé dans la liste comme archive.
+            send({ type: 'mj:tournament:reset' });
           }}
         >
-          <RotateCcw className="h-4 w-4" /> Nouveau tournoi
+          <RotateCcw className="h-4 w-4" /> Retour au menu
         </Button>
       </div>
     </div>

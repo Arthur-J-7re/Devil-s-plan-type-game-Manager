@@ -9,37 +9,29 @@
     "maxPlayers": 12,
     "description": "Le village se réveille, certains complotent dans l'ombre. Survivez ou triomphez en désignant les bons coupables. Les survivants du camp vainqueur empochent des pièces.",
     "sideMissions": [
-      { "id": "lg-m1", "label": "Trouver un loup avant la nuit 2", "reward": 1 },
-      { "id": "lg-m2", "label": "Survivre jusqu'à la fin sans être ciblé", "reward": 1 }
+      {
+        "id": "lg-m1",
+        "label": "Trouver un loup avant la nuit 2",
+        "reward": 1
+      },
+      {
+        "id": "lg-m2",
+        "label": "Survivre jusqu'à la fin sans être ciblé",
+        "reward": 1
+      }
     ],
     "bonuses": [
-      { "id": "lg-b1", "label": "Indice du Maître de jeu", "cost": 2, "description": "Un indice anonyme sur l'identité d'un joueur" }
+      {
+        "id": "lg-b1",
+        "label": "Indice du Maître de jeu",
+        "cost": 2,
+        "description": "Un indice anonyme sur l'identité d'un joueur"
+      }
     ],
     "votes": [
       {
         "id": "lg-vote-village",
         "label": "Désigner le joueur à éliminer (village)",
-        "options": "players",
-        "mode": "anonymous-majority"
-      }
-    ]
-  },
-  {
-    "id": "blanc-manger-coco",
-    "name": "Blanc-Manger Coco",
-    "type": "gold",
-    "durationMin": 20,
-    "minPlayers": 4,
-    "maxPlayers": 10,
-    "description": "Complétez des phrases avec des cartes loufoques. Le joueur qui choisit la meilleure carte gagne le pli. Trois plis gagnés = victoire.",
-    "goldFormula": { "ranks": [2, 1, 0, 0, -1] },
-    "sideMissions": [
-      { "id": "bmc-m1", "label": "Faire éclater de rire le MJ", "reward": 1 }
-    ],
-    "votes": [
-      {
-        "id": "bmc-vote-best",
-        "label": "Meilleure réponse du pli",
         "options": "players",
         "mode": "anonymous-majority"
       }
@@ -53,9 +45,21 @@
     "minPlayers": 3,
     "maxPlayers": 6,
     "description": "Pari et bluff: misez sur combien de fleurs vous pouvez retourner sans tomber sur un crâne.",
-    "goldFormula": { "ranks": [3, 1, 0, -1, -2] },
+    "goldFormula": {
+      "ranks": [
+        3,
+        1,
+        0,
+        -1,
+        -2
+      ]
+    },
     "bonuses": [
-      { "id": "skull-b1", "label": "Échanger sa carte de départ", "cost": 1 }
+      {
+        "id": "skull-b1",
+        "label": "Échanger sa carte de départ",
+        "cost": 1
+      }
     ]
   },
   {
@@ -84,7 +88,14 @@
     "minPlayers": 4,
     "maxPlayers": 8,
     "description": "Trouvez les fils à couper avant que la bombe n'explose. Coopération, déduction, et trahison.",
-    "goldFormula": { "ranks": [2, 1, 0, -1] },
+    "goldFormula": {
+      "ranks": [
+        2,
+        1,
+        0,
+        -1
+      ]
+    },
     "votes": [
       {
         "id": "tb-vote-suspect",

@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { useStore } from '@/lib/store';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Coin } from '@/components/Coin';
 import { sortPlayers } from '@/components/Leaderboard';
 import { savePlayerIdentity, clearPlayerIdentity } from './PlayerApp';
-import { Flame, LogOut, Skull, Swords, Vote } from 'lucide-react';
+import { Flame, HandCoins, LogOut, Shield, Skull, Swords, Vote } from 'lucide-react';
 
 export function LobbyScreen() {
   const tournament = useStore((s) => s.tournament);
@@ -83,6 +84,7 @@ export function LobbyScreen() {
       </Card>
 
       <CurrentEvent />
+      <DonateCard />
       <VoteCard />
 
       <Card>
@@ -165,6 +167,156 @@ function CurrentEvent() {
       </CardHeader>
       <CardContent>
         <p className="text-sm text-muted-foreground">{game?.description}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function DonateCard() {
+  const tournament = useStore((s) => s.tournament)!;
+  const playerId = useStore((s) => s.playerId)!;
+  const send = useStore((s) => s.send);
+  const me = tournament.players.find((p) => p.id === playerId);
+
+  const [toId, setToId] = useState<string | null>(null);
+  const [amount, setAmount] = useState<number>(1);
+  const [sent, setSent] = useState(false);
+
+  useEffect(() => {
+    if (!sent) return;
+    const t = setTimeout(() => setSent(false), 2500);
+    return () => clearTimeout(t);
+  }, [sent]);
+
+  // Les dons ne sont ouverts qu'entre les manches, pour les joueurs encore en vie
+  if (tournament.phase !== 'dashboard') return null;
+  if (!me || me.status !== 'alive') return null;
+
+  const maxDonatable = me.gold - 1; // on garde toujours ≥ 1 pièce
+
+  // Règle de groupes : si une convocation est en cours (avant un jeu d'élim),
+  // on ne peut donner qu'aux membres de son propre groupe — convoqués entre
+  // eux, joueurs hors duel entre eux.
+  const convoked = tournament.nextRoundParticipants;
+  const groupsActive = convoked.length > 0;
+  const iAmConvoked = groupsActive && convoked.includes(me.id);
+
+  const recipients = sortPlayers(
+    tournament.players.filter((p) => {
+      if (p.status !== 'alive' || p.id === me.id) return false;
+      if (!groupsActive) return true;
+      return iAmConvoked ? convoked.includes(p.id) : !convoked.includes(p.id);
+    })
+  );
+
+  if (maxDonatable < 1) return null;
+
+  const recipient = recipients.find((p) => p.id === toId) ?? null;
+  const canSend = recipient !== null && amount >= 1 && amount <= maxDonatable;
+
+  const doDonate = () => {
+    if (!canSend || toId === null) return;
+    send({ type: 'player:donate', payload: { toId, amount } });
+    setSent(true);
+    setToId(null);
+    setAmount(1);
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg flex items-center gap-2">
+          <HandCoins className="h-5 w-5" /> Faire un don
+        </CardTitle>
+        <CardDescription>
+          Tu dois garder au moins 1 pièce (max {maxDonatable}).
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {groupsActive && (
+          <div
+            className={`flex items-start gap-2 rounded-md border px-3 py-2 text-xs ${
+              iAmConvoked
+                ? 'border-destructive/40 bg-destructive/5'
+                : 'border-emerald-500/40 bg-emerald-500/5'
+            }`}
+          >
+            {iAmConvoked ? (
+              <Swords className="h-4 w-4 shrink-0 text-destructive" />
+            ) : (
+              <Shield className="h-4 w-4 shrink-0 text-emerald-500" />
+            )}
+            <p>
+              {iAmConvoked
+                ? 'Tu es convoqué pour le duel. Tu ne peux donner qu\'aux autres convoqués.'
+                : 'Tu es hors duel. Tu ne peux donner qu\'aux autres joueurs hors duel.'}
+            </p>
+          </div>
+        )}
+
+        {recipients.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            {groupsActive
+              ? 'Personne dans ton groupe pour recevoir un don.'
+              : 'Aucun autre joueur à qui donner.'}
+          </p>
+        ) : (
+          <div className="grid gap-1.5 sm:grid-cols-2">
+            {recipients.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => setToId((cur) => (cur === p.id ? null : p.id))}
+                className={`flex items-center gap-2 rounded-md border bg-card px-3 py-2 text-left text-sm ${
+                  toId === p.id ? 'border-primary' : ''
+                }`}
+              >
+                <span className="flex-1 truncate">{p.pseudo}</span>
+                <Coin count={p.gold} size="sm" />
+              </button>
+            ))}
+          </div>
+        )}
+        {recipients.length > 0 && (
+          <>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                type="button"
+                onClick={() => setAmount((a) => Math.max(1, a - 1))}
+              >
+                −
+              </Button>
+              <Input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={maxDonatable}
+                value={amount}
+                onChange={(e) => {
+                  const n = Number.parseInt(e.target.value, 10);
+                  setAmount(Number.isNaN(n) ? 0 : Math.min(maxDonatable, Math.max(0, n)));
+                }}
+                className="text-center"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                type="button"
+                onClick={() => setAmount((a) => Math.min(maxDonatable, a + 1))}
+              >
+                +
+              </Button>
+            </div>
+            <Button className="w-full" disabled={!canSend} onClick={doDonate}>
+              <HandCoins className="h-4 w-4" />
+              {recipient ? `Donner ${amount} à ${recipient.pseudo}` : 'Choisis un bénéficiaire'}
+            </Button>
+            {sent && (
+              <p className="text-center text-xs font-medium text-emerald-500">Don envoyé !</p>
+            )}
+          </>
+        )}
       </CardContent>
     </Card>
   );

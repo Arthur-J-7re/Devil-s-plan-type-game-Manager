@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useStore } from '@/lib/store';
 import type { Bonus, Game, GameType, RankingMode, SideMission, VoteConfig } from '@/types';
+import { allBrackets } from '@/lib/scoring';
 import { GamePoster } from '@/components/GamePoster';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -22,6 +23,7 @@ type DraftVote = {
   optionsMode: 'players' | 'custom';
   customOptions: { id: string; label: string }[];
 };
+type DraftBracket = { minPlayers: string; ranks: string[] };
 
 type Draft = {
   id: string;
@@ -33,7 +35,7 @@ type Draft = {
   minPlayers: string;
   maxPlayers: string;
   description: string;
-  ranks: string[];
+  brackets: DraftBracket[];
   missions: DraftMission[];
   bonuses: DraftBonus[];
   votes: DraftVote[];
@@ -49,7 +51,7 @@ const INITIAL_DRAFT: Draft = {
   minPlayers: '4',
   maxPlayers: '8',
   description: '',
-  ranks: ['2', '1', '0', '-1'],
+  brackets: [{ minPlayers: '0', ranks: ['2', '1', '0', '-1'] }],
   missions: [],
   bonuses: [],
   votes: [],
@@ -84,6 +86,7 @@ export function GameCreatorScreen({
   );
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const effectiveId = draft.idTouched && draft.id ? draft.id : slugify(draft.name);
 
@@ -91,6 +94,33 @@ export function GameCreatorScreen({
 
   const update = <K extends keyof Draft>(key: K, value: Draft[K]) =>
     setDraft((d) => ({ ...d, [key]: value }));
+
+  const onDelete = async () => {
+    if (!editing || !originalId) return;
+    if (!confirm(`Supprimer définitivement "${initial!.name}" du catalogue ?`)) return;
+    setError(null);
+    setDeleting(true);
+    try {
+      const r = await fetch(`/api/catalog/games/${encodeURIComponent(originalId)}`, {
+        method: 'DELETE',
+      });
+      if (!r.ok) {
+        const body = (await r.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${r.status}`);
+      }
+      if (tournament && tournament.catalog.some((g) => g.id === originalId)) {
+        send({
+          type: 'mj:catalog:set',
+          payload: { games: tournament.catalog.filter((g) => g.id !== originalId) },
+        });
+      }
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const onSubmit = async () => {
     setError(null);
@@ -251,9 +281,9 @@ export function GameCreatorScreen({
           </Card>
 
           {draft.type === 'gold' && draft.rankingMode === 'points' && (
-            <RanksCard
-              ranks={draft.ranks}
-              onChange={(ranks) => update('ranks', ranks)}
+            <BracketsCard
+              brackets={draft.brackets}
+              onChange={(brackets) => update('brackets', brackets)}
             />
           )}
 
@@ -277,7 +307,7 @@ export function GameCreatorScreen({
                 </p>
               )}
               <div className="flex flex-wrap gap-2">
-                <Button onClick={onSubmit} disabled={saving || !draft.name.trim()}>
+                <Button onClick={onSubmit} disabled={saving || deleting || !draft.name.trim()}>
                   {saving ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
@@ -285,9 +315,24 @@ export function GameCreatorScreen({
                   )}
                   {editing ? 'Enregistrer les modifications' : 'Enregistrer le jeu'}
                 </Button>
-                <Button variant="ghost" onClick={onClose} disabled={saving}>
+                <Button variant="ghost" onClick={onClose} disabled={saving || deleting}>
                   Annuler
                 </Button>
+                {editing && (
+                  <Button
+                    variant="ghost"
+                    onClick={onDelete}
+                    disabled={saving || deleting}
+                    className="ml-auto text-destructive hover:text-destructive hover:bg-destructive/10"
+                  >
+                    {deleting ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4" />
+                    )}
+                    Supprimer ce jeu
+                  </Button>
+                )}
               </div>
               <p className="text-xs text-muted-foreground">
                 Sauvegardé dans <code>server/data/games.json</code>
@@ -361,57 +406,103 @@ function TypeButton({
   );
 }
 
-function RanksCard({
-  ranks,
+function BracketsCard({
+  brackets,
   onChange,
 }: {
-  ranks: string[];
-  onChange: (next: string[]) => void;
+  brackets: DraftBracket[];
+  onChange: (next: DraftBracket[]) => void;
 }) {
+  const patchBracket = (idx: number, patch: Partial<DraftBracket>) =>
+    onChange(brackets.map((b, i) => (i === idx ? { ...b, ...patch } : b)));
+  const patchRanks = (idx: number, ranks: string[]) => patchBracket(idx, { ranks });
+  const removeBracket = (idx: number) => onChange(brackets.filter((_, i) => i !== idx));
+  const addBracket = () => {
+    const last = brackets[brackets.length - 1];
+    const nextMin = last ? Math.max(0, (Number(last.minPlayers) || 0) + 2) : 0;
+    onChange([
+      ...brackets,
+      { minPlayers: String(nextMin), ranks: last ? [...last.ranks] : ['2', '1', '0', '-1'] },
+    ]);
+  };
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-base">Formule de gains</CardTitle>
         <CardDescription>
-          Pièces gagnées/perdues selon le rang final. La dernière valeur s'applique à tous les
-          joueurs au-delà.
+          Pièces gagnées/perdues selon le rang final. Plusieurs tranches possibles selon le nombre
+          de participants ; la tranche active est la dernière dont le seuil est atteint.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <div className="flex flex-wrap gap-2">
-          {ranks.map((v, i) => (
-            <div key={i} className="flex items-center gap-1 rounded-md border bg-background px-2 py-1">
-              <span className="text-xs text-muted-foreground">#{i + 1}</span>
+        {brackets.map((b, idx) => (
+          <div key={idx} className="rounded-md border bg-card/50 p-3 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Label className="text-xs uppercase tracking-wider text-muted-foreground">
+                À partir de
+              </Label>
               <Input
                 type="number"
-                value={v}
-                onChange={(e) => {
-                  const next = [...ranks];
-                  next[i] = e.target.value;
-                  onChange(next);
-                }}
-                className="w-16 h-7 px-2 py-0 text-sm"
+                min={0}
+                max={50}
+                value={b.minPlayers}
+                onChange={(e) => patchBracket(idx, { minPlayers: e.target.value })}
+                className="w-20 h-8"
               />
+              <span className="text-sm text-muted-foreground">joueurs</span>
               <Button
                 size="icon"
                 variant="ghost"
-                className="h-6 w-6"
-                onClick={() => onChange(ranks.filter((_, j) => j !== i))}
-                disabled={ranks.length <= 1}
-                aria-label={`Retirer le rang #${i + 1}`}
+                className="ml-auto h-7 w-7 text-destructive hover:text-destructive"
+                onClick={() => removeBracket(idx)}
+                disabled={brackets.length <= 1}
+                aria-label="Supprimer la tranche"
               >
-                <Minus className="h-3 w-3" />
+                <Trash2 className="h-3.5 w-3.5" />
               </Button>
             </div>
-          ))}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => onChange([...ranks, '0'])}
-          >
-            <Plus className="h-3 w-3" /> Rang
-          </Button>
-        </div>
+            <div className="flex flex-wrap gap-2">
+              {b.ranks.map((v, i) => (
+                <div
+                  key={i}
+                  className="flex items-center gap-1 rounded-md border bg-background px-2 py-1"
+                >
+                  <span className="text-xs text-muted-foreground">#{i + 1}</span>
+                  <Input
+                    type="number"
+                    value={v}
+                    onChange={(e) => {
+                      const next = [...b.ranks];
+                      next[i] = e.target.value;
+                      patchRanks(idx, next);
+                    }}
+                    className="w-16 h-7 px-2 py-0 text-sm"
+                  />
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-6 w-6"
+                    onClick={() => patchRanks(idx, b.ranks.filter((_, j) => j !== i))}
+                    disabled={b.ranks.length <= 1}
+                    aria-label={`Retirer le rang #${i + 1}`}
+                  >
+                    <Minus className="h-3 w-3" />
+                  </Button>
+                </div>
+              ))}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => patchRanks(idx, [...b.ranks, '0'])}
+              >
+                <Plus className="h-3 w-3" /> Rang
+              </Button>
+            </div>
+          </div>
+        ))}
+        <Button size="sm" variant="outline" onClick={addBracket}>
+          <Plus className="h-3 w-3" /> Tranche
+        </Button>
       </CardContent>
     </Card>
   );
@@ -725,7 +816,12 @@ function buildPreview(draft: Draft, id: string): Game {
     game.rankingMode = draft.rankingMode;
     if (draft.rankingMode === 'points') {
       game.goldFormula = {
-        ranks: draft.ranks.map((r) => toInt(r, 0)),
+        brackets: draft.brackets
+          .map((b) => ({
+            minPlayers: Math.max(0, toInt(b.minPlayers, 0)),
+            ranks: b.ranks.map((r) => toInt(r, 0)),
+          }))
+          .sort((a, b) => a.minPlayers - b.minPlayers),
       };
     }
   }
@@ -742,6 +838,7 @@ function buildPayload(draft: Draft, id: string): unknown {
 }
 
 function draftFromGame(g: Game): Draft {
+  const brackets = allBrackets(g.goldFormula);
   return {
     id: g.id,
     idTouched: true,
@@ -752,7 +849,13 @@ function draftFromGame(g: Game): Draft {
     minPlayers: String(g.minPlayers),
     maxPlayers: String(g.maxPlayers),
     description: g.description ?? '',
-    ranks: (g.goldFormula?.ranks ?? [2, 1, 0, -1]).map(String),
+    brackets:
+      brackets.length > 0
+        ? brackets.map((b) => ({
+            minPlayers: String(b.minPlayers),
+            ranks: b.ranks.map(String),
+          }))
+        : [{ minPlayers: '0', ranks: ['2', '1', '0', '-1'] }],
     missions: (g.sideMissions ?? []).map((m) => ({
       id: m.id,
       label: m.label,

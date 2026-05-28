@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '@/lib/store';
-import { clearLocalStorage, downloadSnapshot } from '@/lib/persistence';
+import { deleteSnapshot, downloadSnapshot } from '@/lib/persistence';
 import type { Game } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -18,7 +18,9 @@ export function SetupScreen() {
   const send = useStore((s) => s.send);
   const [editor, setEditor] = useState<{ kind: 'create' } | { kind: 'edit'; game: Game } | null>(null);
 
-  if (!tournament) return <CreateTournamentForm />;
+  // L'écran ne s'affiche que pour un tournoi en phase setup ; la création
+  // a sa propre vue (HomeScreen → CreateTournamentForm).
+  if (!tournament) return null;
 
   if (editor) {
     return (
@@ -59,7 +61,7 @@ export function SetupScreen() {
               className="text-destructive hover:text-destructive"
               onClick={() => {
                 if (confirm('Réinitialiser le tournoi (tout perdre) ?')) {
-                  clearLocalStorage();
+                  deleteSnapshot(tournament.id);
                   send({ type: 'mj:tournament:reset' });
                 }
               }}
@@ -74,7 +76,7 @@ export function SetupScreen() {
   );
 }
 
-function CreateTournamentForm() {
+export function CreateTournamentForm({ onCancel }: { onCancel?: () => void } = {}) {
   const send = useStore((s) => s.send);
   const [name, setName] = useState('Tournoi du Diable');
   const [startGold, setStartGold] = useState(1);
@@ -112,18 +114,25 @@ function CreateTournamentForm() {
               <Coin count={startGold} size="sm" /> par joueur en début de tournoi.
             </p>
           </div>
-          <Button
-            className="w-full"
-            disabled={!name.trim()}
-            onClick={() =>
-              send({
-                type: 'mj:tournament:create',
-                payload: { name: name.trim(), startGold },
-              })
-            }
-          >
-            Créer le tournoi
-          </Button>
+          <div className="flex gap-2">
+            {onCancel && (
+              <Button variant="ghost" onClick={onCancel}>
+                Annuler
+              </Button>
+            )}
+            <Button
+              className="flex-1"
+              disabled={!name.trim()}
+              onClick={() =>
+                send({
+                  type: 'mj:tournament:create',
+                  payload: { name: name.trim(), startGold },
+                })
+              }
+            >
+              Créer le tournoi
+            </Button>
+          </div>
         </CardContent>
       </Card>
     </div>

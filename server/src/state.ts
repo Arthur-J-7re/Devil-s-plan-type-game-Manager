@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type {
   ActiveVote,
+  Donation,
   Game,
   GoldChange,
   Phase,
@@ -13,6 +14,7 @@ import type {
 } from './types.js';
 import {
   computeDeltasFromTiers,
+  ranksForPlayerCount,
   tiersFromPoints,
 } from './scoring.js';
 
@@ -56,6 +58,8 @@ export function createTournament(name: string, startGold: number): Tournament {
     rounds: [],
     currentRound: null,
     currentVote: null,
+    donations: [],
+    nextRoundParticipants: [],
     gameCounter: 0,
     createdAt: nowIso(),
   };
@@ -78,6 +82,8 @@ export function restoreTournament(t: Tournament) {
     currentRound: fixRound(t.currentRound),
     rounds: t.rounds.map((r) => fixRound(r) as Round),
     currentVote: t.currentVote ? { ...t.currentVote } : null,
+    donations: t.donations ?? [],
+    nextRoundParticipants: t.nextRoundParticipants ?? [],
   };
 }
 
@@ -94,6 +100,26 @@ export function setCatalog(games: Game[]) {
 export function setPhase(phase: Phase) {
   const t = requireTournament();
   t.phase = phase;
+  // Les groupes d'échange n'ont de sens que pendant le dashboard
+  if (phase !== 'dashboard') t.nextRoundParticipants = [];
+}
+
+/**
+ * Convoque (ou met à jour) la liste des joueurs prévus pour la prochaine manche.
+ * Côté MJ : utilisé en phase dashboard avant un jeu d'élimination. Sert
+ * également à structurer les groupes de dons (convoqués entre eux,
+ * non-convoqués vivants entre eux).
+ */
+export function setNextRoundParticipants(ids: string[]) {
+  const t = requireTournament();
+  // dédoublonne et ne garde que les joueurs existants
+  const known = new Set(t.players.map((p) => p.id));
+  const seen = new Set<string>();
+  t.nextRoundParticipants = ids.filter((id) => {
+    if (!known.has(id) || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
 }
 
 export function addPlayer(pseudo: string): Player {
@@ -165,6 +191,7 @@ export function startRound(gameId: string, participants: string[]): Round {
   };
   t.currentRound = round;
   t.phase = 'presenting';
+  t.nextRoundParticipants = [];
   return round;
 }
 
@@ -206,6 +233,7 @@ export function cancelRound() {
   }
   t.currentRound = null;
   t.currentVote = null;
+  t.nextRoundParticipants = [];
   t.phase = 'dashboard';
 }
 
@@ -312,7 +340,8 @@ function applyTieredRanking(tiers: string[][]) {
   );
 
   const flatRanking = tiers.flat();
-  const deltas = computeDeltasFromTiers(tiers, game.goldFormula.ranks);
+  const ranks = ranksForPlayerCount(game.goldFormula, t.currentRound.participants.length);
+  const deltas = computeDeltasFromTiers(tiers, ranks);
 
   for (const [playerId, delta] of deltas) {
     if (delta === 0) continue;
@@ -370,9 +399,110 @@ export function endRound() {
   t.rounds.push(t.currentRound);
   t.currentRound = null;
   t.currentVote = null;
+  t.nextRoundParticipants = [];
   t.gameCounter += 1;
   const alive = t.players.filter((p) => p.status === 'alive');
   t.phase = alive.length <= 1 ? 'finished' : 'dashboard';
+}
+
+/** Indique, pour un joueur donné, à quel groupe d'échange il appartient. */
+function donationGroup(t: Tournament, playerId: string): 'convoked' | 'safe' | null {
+  if (t.nextRoundParticipants.length === 0) return null;
+  return t.nextRoundParticipants.includes(playerId) ? 'convoked' : 'safe';
+}
+
+/**
+ * Don de pièces entre deux joueurs vivants, uniquement entre les manches
+ * (phase 'dashboard'). Le donateur doit conserver au moins 1 pièce : on ne
+ * peut pas s'auto-éliminer par un don. Si une convocation est en cours
+ * (avant un jeu d'élimination), donneur et bénéficiaire doivent appartenir
+ * au même groupe (convoqués entre eux, non-convoqués vivants entre eux).
+ */
+export function donate(fromId: string, toId: string, amount: number): Donation {
+  const t = requireTournament();
+  if (t.phase !== 'dashboard') {
+    throw new Error('Les dons ne sont possibles qu\'entre les manches');
+  }
+  if (fromId === toId) throw new Error('Don vers soi-même impossible');
+  if (!Number.isFinite(amount)) throw new Error('Montant invalide');
+  const value = Math.round(amount);
+  if (value <= 0) throw new Error('Le montant doit être positif');
+
+  const from = t.players.find((p) => p.id === fromId);
+  const to = t.players.find((p) => p.id === toId);
+  if (!from) throw new Error('Donateur introuvable');
+  if (!to) throw new Error('Bénéficiaire introuvable');
+  if (from.status !== 'alive') throw new Error('Donateur éliminé');
+  if (to.status !== 'alive') throw new Error('Bénéficiaire éliminé');
+
+  // Règle de groupes (active uniquement si une convocation est en cours)
+  const fromGroup = donationGroup(t, fromId);
+  const toGroup = donationGroup(t, toId);
+  if (fromGroup !== null && fromGroup !== toGroup) {
+    throw new Error(
+      fromGroup === 'convoked'
+        ? 'Tu es convoqué : tu ne peux donner qu\'aux autres convoqués'
+        : 'Tu es hors duel : tu ne peux donner qu\'aux autres joueurs hors duel'
+    );
+  }
+
+  const maxDonatable = from.gold - 1;
+  if (maxDonatable < 1) throw new Error('Pas assez de pièces pour donner');
+  if (value > maxDonatable) {
+    throw new Error(`Tu dois garder au moins 1 pièce (max ${maxDonatable})`);
+  }
+
+  from.gold = clampGold(from.gold - value);
+  to.gold = clampGold(to.gold + value);
+
+  const donation: Donation = {
+    id: pid(),
+    fromId,
+    toId,
+    amount: value,
+    at: nowIso(),
+  };
+  t.donations.push(donation);
+  return donation;
+}
+
+/**
+ * Transfert forcé par le MJ : permet notamment de redistribuer les pièces
+ * d'un joueur éliminé. Aucune contrainte de groupe ni de solde minimum côté
+ * source ; le bénéficiaire doit être en vie. Logué comme don avec byMj=true.
+ */
+export function mjTransfer(fromId: string, toId: string, amount: number): Donation {
+  const t = requireTournament();
+  if (t.phase !== 'dashboard') {
+    throw new Error('Redistribution possible uniquement entre les manches');
+  }
+  if (fromId === toId) throw new Error('Transfert vers soi-même impossible');
+  if (!Number.isFinite(amount)) throw new Error('Montant invalide');
+  const value = Math.round(amount);
+  if (value <= 0) throw new Error('Le montant doit être positif');
+
+  const from = t.players.find((p) => p.id === fromId);
+  const to = t.players.find((p) => p.id === toId);
+  if (!from) throw new Error('Source introuvable');
+  if (!to) throw new Error('Bénéficiaire introuvable');
+  if (to.status !== 'alive') throw new Error('Bénéficiaire éliminé');
+  if (from.gold < value) throw new Error(`Solde insuffisant (${from.gold} dispo)`);
+
+  from.gold = clampGold(from.gold - value);
+  to.gold = clampGold(to.gold + value);
+  // Si la source était vivante et tombe à 0, on déclenche l'élimination
+  if (from.status === 'alive') applyEliminationIfBroke(from);
+
+  const donation: Donation = {
+    id: pid(),
+    fromId,
+    toId,
+    amount: value,
+    at: nowIso(),
+    byMj: true,
+  };
+  t.donations.push(donation);
+  return donation;
 }
 
 // Votes

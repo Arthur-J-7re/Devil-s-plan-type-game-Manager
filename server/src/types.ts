@@ -2,10 +2,24 @@
 export type GameType = 'gold' | 'elimination';
 export type RankingMode = 'points' | 'manual';
 
-export type GoldFormula = {
-  // index = rang (0-based, 0 = 1er). Delta de PO à appliquer.
-  // si moins de joueurs que d'entrées, on tronque; si plus, on étend avec la dernière valeur.
+export type GoldFormulaBracket = {
+  /** Nombre minimal de participants pour que cette tranche s'applique (inclusif). */
+  minPlayers: number;
+  /** index = rang (0-based, 0 = 1er). Delta de PO à appliquer. */
   ranks: number[];
+};
+
+export type GoldFormula = {
+  /**
+   * Tranches de barème par effectif. La tranche active est la dernière dont
+   * `minPlayers ≤ effectif` ; si l'effectif est plus petit que toutes les
+   * tranches, la première est utilisée par défaut.
+   *
+   * Pour la rétro-compat, `ranks` au niveau racine est toujours accepté en
+   * entrée (équivalent à une tranche unique avec minPlayers=0) — on le
+   * normalise vers `brackets` au plus tôt.
+   */
+  brackets: GoldFormulaBracket[];
 };
 
 export type SideMission = {
@@ -63,6 +77,17 @@ export type GoldChange = {
   at: string;
 };
 
+/** Don de pièces d'un joueur vers un autre, entre deux manches (phase dashboard). */
+export type Donation = {
+  id: string;
+  fromId: string;
+  toId: string;
+  amount: number;
+  at: string;
+  /** true si c'est un transfert forcé par le MJ (redistribution d'éliminé, etc.) */
+  byMj?: boolean;
+};
+
 export type Round = {
   id: string;
   gameId: string;
@@ -105,6 +130,14 @@ export type Tournament = {
   rounds: Round[];
   currentRound: Round | null;
   currentVote: ActiveVote | null;
+  donations: Donation[];
+  /**
+   * Joueurs convoqués pour la prochaine manche (utilisé pour les jeux d'élimination).
+   * Définit les deux groupes d'échange autorisés pendant la fenêtre de dons :
+   * convoqués entre eux, non-convoqués vivants entre eux. Vide = pas de groupes,
+   * dons libres entre tous les vivants.
+   */
+  nextRoundParticipants: string[];
   gameCounter: number;
   createdAt: string;
 };
@@ -132,8 +165,11 @@ export type ClientMessage =
   | { type: 'mj:vote:open'; payload: { configId: string } }
   | { type: 'mj:vote:close' }
   | { type: 'mj:vote:clear' }
+  | { type: 'mj:next-round:set-participants'; payload: { participants: string[] } }
+  | { type: 'mj:donate'; payload: { fromId: string; toId: string; amount: number } }
   | { type: 'player:join'; payload: { pseudo: string; playerId?: string } }
   | { type: 'player:vote'; payload: { optionId: string } }
+  | { type: 'player:donate'; payload: { toId: string; amount: number } }
   | { type: 'ping'; payload: { t: number } };
 
 // Vue redactée pour les joueurs : on n'envoie pas les bulletins individuels

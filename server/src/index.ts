@@ -14,7 +14,9 @@ import {
   clearVote,
   closeVote,
   createTournament,
+  donate,
   endRound,
+  mjTransfer,
   findPlayerByPseudo,
   getPublicTournament,
   getTournament,
@@ -27,12 +29,18 @@ import {
   setCatalog,
   setEliminationLoser,
   setManualDistribution,
+  setNextRoundParticipants,
   setPhase,
   setPlayerConnected,
   setRoundPoints,
   startRound,
 } from './state.js';
-import { appendGameToCatalog, loadDefaultCatalog, updateGameInCatalog } from './catalog.js';
+import {
+  appendGameToCatalog,
+  deleteGameFromCatalog,
+  loadDefaultCatalog,
+  updateGameInCatalog,
+} from './catalog.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
 
@@ -77,6 +85,16 @@ app.put('/api/catalog/games/:id', async (req, res) => {
   try {
     const game = await updateGameInCatalog(req.params.id, req.body);
     res.json(game);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    res.status(msg.includes('introuvable') ? 404 : 400).json({ error: msg });
+  }
+});
+
+app.delete('/api/catalog/games/:id', async (req, res) => {
+  try {
+    const result = await deleteGameFromCatalog(req.params.id);
+    res.json(result);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     res.status(msg.includes('introuvable') ? 404 : 400).json({ error: msg });
@@ -256,6 +274,16 @@ function handle(c: Conn, msg: ClientMessage) {
       clearVote();
       break;
 
+    case 'mj:next-round:set-participants':
+      requireMj(c);
+      setNextRoundParticipants(msg.payload.participants);
+      break;
+
+    case 'mj:donate':
+      requireMj(c);
+      mjTransfer(msg.payload.fromId, msg.payload.toId, msg.payload.amount);
+      break;
+
     case 'player:join': {
       const t = getTournament();
       if (!t) throw new Error('Pas de tournoi en cours');
@@ -278,6 +306,11 @@ function handle(c: Conn, msg: ClientMessage) {
     case 'player:vote':
       if (!c.playerId) throw new Error('Joueur non identifié');
       castVote(c.playerId, msg.payload.optionId);
+      break;
+
+    case 'player:donate':
+      if (!c.playerId) throw new Error('Joueur non identifié');
+      donate(c.playerId, msg.payload.toId, msg.payload.amount);
       break;
 
     default: {

@@ -2,8 +2,13 @@
 export type GameType = 'gold' | 'elimination';
 export type RankingMode = 'points' | 'manual';
 
-export type GoldFormula = {
+export type GoldFormulaBracket = {
+  minPlayers: number;
   ranks: number[];
+};
+
+export type GoldFormula = {
+  brackets: GoldFormulaBracket[];
 };
 
 export type SideMission = {
@@ -57,6 +62,15 @@ export type GoldChange = {
   at: string;
 };
 
+export type Donation = {
+  id: string;
+  fromId: string;
+  toId: string;
+  amount: number;
+  at: string;
+  byMj?: boolean;
+};
+
 export type Round = {
   id: string;
   gameId: string;
@@ -98,6 +112,8 @@ export type Tournament = {
   rounds: Round[];
   currentRound: Round | null;
   currentVote: PublicVote | null;
+  donations: Donation[];
+  nextRoundParticipants: string[];
   gameCounter: number;
   createdAt: string;
 };
@@ -126,8 +142,11 @@ export type ClientMessage =
   | { type: 'mj:vote:open'; payload: { configId: string } }
   | { type: 'mj:vote:close' }
   | { type: 'mj:vote:clear' }
+  | { type: 'mj:next-round:set-participants'; payload: { participants: string[] } }
+  | { type: 'mj:donate'; payload: { fromId: string; toId: string; amount: number } }
   | { type: 'player:join'; payload: { pseudo: string; playerId?: string } }
   | { type: 'player:vote'; payload: { optionId: string } }
+  | { type: 'player:donate'; payload: { toId: string; amount: number } }
   | { type: 'ping'; payload: { t: number } };
 
 export type ServerMessage =

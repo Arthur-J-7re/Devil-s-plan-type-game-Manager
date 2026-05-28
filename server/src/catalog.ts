@@ -1,7 +1,14 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import type { Bonus, Game, RankingMode, SideMission, VoteConfig } from './types.js';
+import type {
+  Bonus,
+  Game,
+  GoldFormulaBracket,
+  RankingMode,
+  SideMission,
+  VoteConfig,
+} from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -10,7 +17,17 @@ const CATALOG_PATH = join(__dirname, '..', 'data', 'games.json');
 
 export async function loadDefaultCatalog(): Promise<Game[]> {
   const raw = await readFile(CATALOG_PATH, 'utf-8');
-  return JSON.parse(raw) as Game[];
+  const games = JSON.parse(raw) as Game[];
+  // Migration silencieuse de l'ancien format `{ ranks: [...] }` vers `{ brackets: [...] }`.
+  for (const g of games) {
+    if (g.goldFormula) {
+      const f = g.goldFormula as { brackets?: GoldFormulaBracket[]; ranks?: number[] };
+      if ((!f.brackets || f.brackets.length === 0) && Array.isArray(f.ranks)) {
+        g.goldFormula = { brackets: [{ minPlayers: 0, ranks: f.ranks }] };
+      }
+    }
+  }
+  return games;
 }
 
 export async function appendGameToCatalog(input: unknown): Promise<Game> {
@@ -22,6 +39,15 @@ export async function appendGameToCatalog(input: unknown): Promise<Game> {
   const next = [...current, game];
   await writeFile(CATALOG_PATH, JSON.stringify(next, null, 2) + '\n', 'utf-8');
   return game;
+}
+
+export async function deleteGameFromCatalog(targetId: string): Promise<{ id: string }> {
+  const current = await loadDefaultCatalog();
+  const idx = current.findIndex((g) => g.id === targetId);
+  if (idx === -1) throw new Error(`Jeu "${targetId}" introuvable`);
+  const next = current.filter((g) => g.id !== targetId);
+  await writeFile(CATALOG_PATH, JSON.stringify(next, null, 2) + '\n', 'utf-8');
+  return { id: targetId };
 }
 
 export async function updateGameInCatalog(targetId: string, input: unknown): Promise<Game> {
@@ -84,19 +110,8 @@ function validateGame(raw: unknown): Game {
       throw new Error('goldFormula requis pour un jeu à pièces en mode "points"');
     }
     if (hasFormula) {
-      const ranks = (o.goldFormula as Record<string, unknown>).ranks;
-      if (!Array.isArray(ranks) || ranks.length === 0) {
-        throw new Error('goldFormula.ranks doit être un tableau non vide');
-      }
-      game.goldFormula = {
-        ranks: ranks.map((n, i) => {
-          const v = Number(n);
-          if (!Number.isFinite(v) || !Number.isInteger(v)) {
-            throw new Error(`goldFormula.ranks[${i}] doit être un entier`);
-          }
-          return v;
-        }),
-      };
+      const brackets = validateBrackets(o.goldFormula as Record<string, unknown>);
+      game.goldFormula = { brackets };
     }
   }
 
@@ -158,6 +173,51 @@ function validateGame(raw: unknown): Game {
   }
 
   return game;
+}
+
+function validateBrackets(raw: Record<string, unknown>): GoldFormulaBracket[] {
+  // Forme legacy : { ranks: [...] } → une tranche unique.
+  if (Array.isArray(raw.ranks) && !raw.brackets) {
+    return [{ minPlayers: 0, ranks: validateRanks(raw.ranks, 'goldFormula.ranks') }];
+  }
+  const list = raw.brackets;
+  if (!Array.isArray(list) || list.length === 0) {
+    throw new Error('goldFormula.brackets doit être un tableau non vide');
+  }
+  const out = list.map((b, i): GoldFormulaBracket => {
+    if (!b || typeof b !== 'object') throw new Error(`goldFormula.brackets[${i}] invalide`);
+    const bo = b as Record<string, unknown>;
+    const minPlayers = Number(bo.minPlayers);
+    if (!Number.isFinite(minPlayers) || !Number.isInteger(minPlayers) || minPlayers < 0) {
+      throw new Error(`goldFormula.brackets[${i}].minPlayers doit être un entier ≥ 0`);
+    }
+    return {
+      minPlayers,
+      ranks: validateRanks(bo.ranks, `goldFormula.brackets[${i}].ranks`),
+    };
+  });
+  // Pas de doublons sur minPlayers (sinon ambigu).
+  const seen = new Set<number>();
+  for (const b of out) {
+    if (seen.has(b.minPlayers)) {
+      throw new Error(`goldFormula.brackets : deux tranches partagent minPlayers=${b.minPlayers}`);
+    }
+    seen.add(b.minPlayers);
+  }
+  return out.sort((a, b) => a.minPlayers - b.minPlayers);
+}
+
+function validateRanks(raw: unknown, label: string): number[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error(`${label} doit être un tableau non vide`);
+  }
+  return raw.map((n, i) => {
+    const v = Number(n);
+    if (!Number.isFinite(v) || !Number.isInteger(v)) {
+      throw new Error(`${label}[${i}] doit être un entier`);
+    }
+    return v;
+  });
 }
 
 function requireString(

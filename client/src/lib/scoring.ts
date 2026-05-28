@@ -1,5 +1,48 @@
 // Jumeau de server/src/scoring.ts — garder en synchro. Doc complète côté serveur.
 
+import type { GoldFormula, GoldFormulaBracket } from '@/types';
+
+export function selectBracket(
+  formula: GoldFormula | { ranks?: number[] } | null | undefined,
+  n: number,
+): GoldFormulaBracket | null {
+  if (!formula) return null;
+  const f = formula as { brackets?: GoldFormulaBracket[]; ranks?: number[] };
+  if (Array.isArray(f.brackets) && f.brackets.length > 0) {
+    const sorted = [...f.brackets].sort((a, b) => a.minPlayers - b.minPlayers);
+    let pick = sorted[0];
+    for (const b of sorted) {
+      if (b.minPlayers <= n) pick = b;
+      else break;
+    }
+    return pick;
+  }
+  if (Array.isArray(f.ranks)) {
+    return { minPlayers: 0, ranks: f.ranks };
+  }
+  return null;
+}
+
+export function ranksForPlayerCount(
+  formula: GoldFormula | { ranks?: number[] } | null | undefined,
+  n: number,
+): number[] {
+  return selectBracket(formula, n)?.ranks ?? [];
+}
+
+/** Renvoie toutes les tranches normalisées (legacy `ranks` → tranche unique). */
+export function allBrackets(
+  formula: GoldFormula | { ranks?: number[] } | null | undefined,
+): GoldFormulaBracket[] {
+  if (!formula) return [];
+  const f = formula as { brackets?: GoldFormulaBracket[]; ranks?: number[] };
+  if (Array.isArray(f.brackets) && f.brackets.length > 0) {
+    return [...f.brackets].sort((a, b) => a.minPlayers - b.minPlayers);
+  }
+  if (Array.isArray(f.ranks)) return [{ minPlayers: 0, ranks: f.ranks }];
+  return [];
+}
+
 export function computeSlots(n: number, ranks: number[]): number[] {
   const positives = ranks.filter((v) => v > 0);
   const negatives = ranks.filter((v) => v < 0);

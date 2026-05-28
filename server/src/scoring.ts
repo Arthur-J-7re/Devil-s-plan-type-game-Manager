@@ -1,3 +1,40 @@
+import type { GoldFormula, GoldFormulaBracket } from './types.js';
+
+/**
+ * Sélectionne la tranche qui s'applique pour `n` participants. La tranche
+ * active est la dernière dont `minPlayers ≤ n`. Si `n` est inférieur à toutes,
+ * la première tranche (par minPlayers) est utilisée comme fallback.
+ *
+ * Accepte aussi un objet legacy `{ ranks: [...] }` (ancienne forme).
+ */
+export function selectBracket(
+  formula: GoldFormula | { ranks?: number[] } | null | undefined,
+  n: number,
+): GoldFormulaBracket | null {
+  if (!formula) return null;
+  const f = formula as { brackets?: GoldFormulaBracket[]; ranks?: number[] };
+  if (Array.isArray(f.brackets) && f.brackets.length > 0) {
+    const sorted = [...f.brackets].sort((a, b) => a.minPlayers - b.minPlayers);
+    let pick = sorted[0];
+    for (const b of sorted) {
+      if (b.minPlayers <= n) pick = b;
+      else break;
+    }
+    return pick;
+  }
+  if (Array.isArray(f.ranks)) {
+    return { minPlayers: 0, ranks: f.ranks };
+  }
+  return null;
+}
+
+export function ranksForPlayerCount(
+  formula: GoldFormula | { ranks?: number[] } | null | undefined,
+  n: number,
+): number[] {
+  return selectBracket(formula, n)?.ranks ?? [];
+}
+
 /**
  * Calcul des gains/pertes de pièces selon le classement.
  *

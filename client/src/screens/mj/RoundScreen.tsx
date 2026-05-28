@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Coin } from '@/components/Coin';
 import { Leaderboard } from '@/components/Leaderboard';
-import { computeDeltasFromTiers, tiersFromPoints } from '@/lib/scoring';
+import { computeDeltasFromTiers, ranksForPlayerCount, tiersFromPoints } from '@/lib/scoring';
 import { Check, Flag, ListChecks, Minus, Plus, Timer, Vote } from 'lucide-react';
 
 export function RoundScreen() {
@@ -160,7 +160,8 @@ function PointsPanel() {
   // Construit les tiers (ex-aequo regroupés) et calcule les deltas prévus
   const { ordered, deltaByPlayer } = useMemo(() => {
     const tiers = tiersFromPoints(round.participants, round.roundPoints);
-    const deltas = computeDeltasFromTiers(tiers, game.goldFormula?.ranks ?? []);
+    const ranks = ranksForPlayerCount(game.goldFormula, round.participants.length);
+    const deltas = computeDeltasFromTiers(tiers, ranks);
     const ordered: {
       id: string;
       player: ReturnType<typeof tournament.players.find>;
@@ -185,7 +186,7 @@ function PointsPanel() {
   }, [
     round.participants,
     round.roundPoints,
-    game.goldFormula?.ranks,
+    game.goldFormula,
     tournament.players,
   ]);
 
