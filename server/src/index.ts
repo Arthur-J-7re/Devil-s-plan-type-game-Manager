@@ -45,11 +45,62 @@ import {
 const PORT = Number(process.env.PORT ?? 3001);
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: true, // Allow all origins for WebSocket
+  credentials: true,
+}));
 app.use(express.json());
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, time: new Date().toISOString() });
+  res.json({ ok: true, time: new Date().toISOString(), port: PORT });
+});
+
+app.get('/test-ws', (_req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/html' });
+  res.end(`
+    <!DOCTYPE html>
+    <html>
+    <head><title>WebSocket Test</title></head>
+    <body>
+      <h1>WebSocket Debug</h1>
+      <p>Server is running on port ${PORT}</p>
+      <p>Attempting to connect to WebSocket...</p>
+      <div id="log" style="border: 1px solid #ccc; padding: 10px; font-family: monospace; height: 300px; overflow: auto;"></div>
+      <script>
+        const log = (msg) => {
+          console.log(msg);
+          document.getElementById('log').innerHTML += msg + '<br>';
+        };
+        
+        log('Current hostname: ' + location.hostname);
+        log('Current host: ' + location.host);
+        log('Protocol: ' + location.protocol);
+        
+        const wsUrl = 'ws://' + location.hostname + ':${PORT}/ws';
+        log('Connecting to: ' + wsUrl);
+        
+        const ws = new WebSocket(wsUrl);
+        
+        ws.onopen = () => {
+          log('✓ WebSocket OPEN');
+          ws.send(JSON.stringify({ type: 'ping', payload: { t: Date.now() } }));
+        };
+        
+        ws.onmessage = (e) => {
+          log('✓ Message received: ' + e.data.substring(0, 100));
+        };
+        
+        ws.onerror = (e) => {
+          log('✗ Error: ' + e);
+        };
+        
+        ws.onclose = (e) => {
+          log('✗ Closed: ' + e.code + ' ' + e.reason);
+        };
+      </script>
+    </body>
+    </html>
+  `);
 });
 
 app.get('/api/network', (_req, res) => {
@@ -61,6 +112,51 @@ app.get('/api/network', (_req, res) => {
     }
   }
   res.json({ ips });
+});
+
+app.get('/api/connection-url', async (_req, res) => {
+  // Try to detect ngrok tunnel
+  try {
+    const response = await fetch('http://localhost:4040/api/tunnels', {
+      method: 'GET',
+      timeout: 1000,
+    });
+    const data = (await response.json()) as any;
+    
+    // Find HTTPS tunnel
+    const tunnel = data.tunnels?.find((t: any) => t.proto === 'https');
+    if (tunnel?.public_url) {
+      return res.json({
+        url: tunnel.public_url,
+        isNgrok: true,
+        type: 'https',
+      });
+    }
+  } catch {
+    // ngrok not available, fall back to local IP
+  }
+
+  // Fall back to local IP
+  const ifs = networkInterfaces();
+  for (const list of Object.values(ifs)) {
+    for (const i of list ?? []) {
+      if (i.family === 'IPv4' && !i.internal) {
+        return res.json({
+          url: `http://${i.address}:5173`,
+          isNgrok: false,
+          type: 'local',
+          ip: i.address,
+        });
+      }
+    }
+  }
+
+  // Last resort
+  res.json({
+    url: `http://localhost:5173`,
+    isNgrok: false,
+    type: 'localhost',
+  });
 });
 
 app.get('/api/catalog/default', async (_req, res) => {
@@ -102,7 +198,17 @@ app.delete('/api/catalog/games/:id', async (req, res) => {
 });
 
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws' });
+const wss = new WebSocketServer({
+  server,
+  path: '/ws',
+  perMessageDeflate: false,
+  clientTracking: true,
+  // Accept all origins and connections
+  verifyClient: (info, callback) => {
+    console.log(`[WebSocket] Verification attempt from origin: ${info.origin}`);
+    callback(true); // Accept all clients
+  },
+});
 
 type Conn = {
   ws: WebSocket;
@@ -112,7 +218,14 @@ type Conn = {
 const conns = new Set<Conn>();
 
 function send(c: Conn, msg: ServerMessage) {
-  if (c.ws.readyState === WebSocket.OPEN) c.ws.send(JSON.stringify(msg));
+  try {
+    if (c.ws.readyState === WebSocket.OPEN) {
+      c.ws.send(JSON.stringify(msg));
+    }
+  } catch (err) {
+    // Silently ignore write errors on closed sockets
+    console.error('WebSocket send error:', err instanceof Error ? err.message : String(err));
+  }
 }
 
 function broadcastState() {
@@ -128,6 +241,8 @@ function sendError(c: Conn, message: string) {
 wss.on('connection', (ws) => {
   const c: Conn = { ws, role: 'guest' };
   conns.add(c);
+  console.log(`[WebSocket] Client connected. Total connections: ${conns.size}`);
+  
   send(c, { type: 'identity', payload: { role: 'guest' } });
   send(c, { type: 'state', payload: { tournament: getPublicTournament() } });
 
@@ -147,6 +262,7 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
+    console.log(`[WebSocket] Client disconnected. Total connections: ${conns.size - 1}`);
     if (c.role === 'player' && c.playerId) {
       setPlayerConnected(c.playerId, false);
       conns.delete(c);
@@ -155,7 +271,21 @@ wss.on('connection', (ws) => {
     }
     conns.delete(c);
   });
+
+  ws.on('error', (err) => {
+    console.error('WebSocket error:', err);
+    conns.delete(c);
+  });
 });
+
+// Heartbeat to keep connections alive
+setInterval(() => {
+  for (const c of conns) {
+    if (c.ws.readyState === WebSocket.OPEN) {
+      c.ws.ping();
+    }
+  }
+}, 30000); // Ping every 30 seconds
 
 function handle(c: Conn, msg: ClientMessage) {
   switch (msg.type) {
@@ -327,6 +457,20 @@ function requireMj(c: Conn) {
 }
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`[server] listening on http://0.0.0.0:${PORT}`);
-  console.log(`[server] WebSocket on ws://0.0.0.0:${PORT}/ws`);
+  console.log(`\n[server] ✓ Server started on port ${PORT}`);
+  console.log(`[server] HTTP:      http://localhost:${PORT}`);
+  console.log(`[server] WebSocket: ws://localhost:${PORT}/ws`);
+  console.log(`[server] Health:    http://localhost:${PORT}/api/health`);
+  console.log(`[server] WS Test:   http://localhost:${PORT}/test-ws`);
+  
+  // Show all network IPs
+  const ifs = networkInterfaces();
+  for (const [name, list] of Object.entries(ifs)) {
+    for (const i of list ?? []) {
+      if (i.family === 'IPv4' && !i.internal) {
+        console.log(`[server] Network:   http://${i.address}:${PORT}  (${name})`);
+      }
+    }
+  }
+  console.log('');
 });

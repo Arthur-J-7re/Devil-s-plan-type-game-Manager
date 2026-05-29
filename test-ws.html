@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>WebSocket Test</title>
+</head>
+<body>
+  <h1>WebSocket Connection Test</h1>
+  <div id="status">Connecting...</div>
+  <div id="messages"></div>
+  <script>
+    const hostname = location.hostname;
+    const wsUrl = `ws://${hostname}:3001/ws`;
+    console.log('Connecting to:', wsUrl);
+    
+    const ws = new WebSocket(wsUrl);
+    const status = document.getElementById('status');
+    const messages = document.getElementById('messages');
+    
+    ws.onopen = () => {
+      status.innerHTML = `✓ Connected to ${wsUrl}`;
+      status.style.color = 'green';
+      ws.send(JSON.stringify({
+        type: 'ping',
+        payload: { t: Date.now() }
+      }));
+    };
+    
+    ws.onmessage = (ev) => {
+      messages.innerHTML += `<div>📨 ${ev.data}</div>`;
+    };
+    
+    ws.onerror = (err) => {
+      status.innerHTML = `✗ Error: ${err}`;
+      status.style.color = 'red';
+    };
+    
+    ws.onclose = () => {
+      status.innerHTML = `✗ Connection closed`;
+      status.style.color = 'red';
+    };
+  </script>
+</body>
+</html>
